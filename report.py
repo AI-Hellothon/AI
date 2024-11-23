@@ -1,4 +1,5 @@
 import os
+import sys
 import requests
 import json
 import mysql.connector
@@ -13,6 +14,8 @@ db_password = os.getenv('DB_PASSWORD')
 db_name = os.getenv('DB_NAME')
 token = os.getenv('ML_API_key')
 
+specific_date= sys.argv[1] 
+
 url = "https://api-cloud-function.elice.io/5a327f26-cc55-45c5-92b7-e909c2df0ba4/v1/chat/completions"
 headers = {
     "accept": "application/json",
@@ -20,12 +23,40 @@ headers = {
     "authorization": f"Bearer {token}"
 }
 
+
 try:
-    with open("content.txt", "r", encoding="utf-8") as input_file:
-        user_input = input_file.read().strip()
-except FileNotFoundError:
-    print("content.txt 파일을 찾을 수 없습니다.")
-    user_input = "기본 입력값"
+    connection = mysql.connector.connect(
+        host=db_host,
+        port=db_port,
+        user=db_user,
+        password=db_password,
+        database=db_name
+    )
+    
+    cursor = connection.cursor()
+
+    select_query = """
+        SELECT question 
+        FROM conversation 
+        WHERE DATE(createdAt) = %s
+    """
+    
+    cursor.execute(select_query, (specific_date,))
+    
+    rows = cursor.fetchall()
+
+    if rows:
+        user_input = "\n".join([row[0] for row in rows])
+    else:
+        user_input = "해당 날짜에 대한 질문 데이터가 없습니다."
+
+except mysql.connector.Error as err:
+    print(f"데이터베이스 오류: {err}")
+    user_input = "데이터베이스 오류로 대화 데이터를 불러올 수 없습니다."
+finally:
+    if connection.is_connected():
+        cursor.close()
+        connection.close()
 
 payload = {
     "model": "helpy-pro",
@@ -82,7 +113,6 @@ except (KeyError, IndexError, json.JSONDecodeError):
         "etc": ""
     }
 
-created_at = datetime.now()
 
 try:
     connection = mysql.connector.connect(
@@ -96,9 +126,9 @@ try:
 
     insert_query = """
         INSERT INTO report (life, health, food, hobby, etc, createdAt)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, default)
     """
-    cursor.execute(insert_query, (report_data["life"], report_data["health"], report_data["food"], report_data["hobby"], report_data["etc"], created_at))
+    cursor.execute(insert_query, (report_data["life"], report_data["health"], report_data["food"], report_data["hobby"], report_data["etc"]))
 
     connection.commit()
     print("데이터가 성공적으로 저장되었습니다.")
